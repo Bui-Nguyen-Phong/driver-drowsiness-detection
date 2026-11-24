@@ -1,0 +1,195 @@
+menu "Example Configuration"
+    
+    config EXAMPLE_CAMERA_VIDEO_BUFFER_NUMBER
+        int "Camera video buffer number"
+        default 2
+        help
+            Number of video buffers for the camera sensor.
+            
+            More buffers provide better performance and reduce frame drops,
+            but consume more memory. Recommended range: 2-4 buffers.
+            
+            - 2 buffers: Minimum for basic operation
+            - 3-4 buffers: Better performance for smooth streaming
+            - Higher values: May improve performance but increase memory usage
+
+    config EXAMPLE_JPEG_COMPRESSION_QUALITY
+        int "JPEG compression quality (%)"
+        default 80
+        range 1 100
+        help
+            JPEG compression quality percentage (1-100).
+
+            Higher values produce better image quality but larger data streams:
+            - 90-100: Excellent quality, high bandwidth usage
+            - 70-90: Good quality, moderate bandwidth (recommended for UVC)
+            - 50-70: Acceptable quality, lower bandwidth
+            - 1-50: Poor quality, minimal bandwidth
+
+            For UVC streaming, consider the USB bandwidth limitations
+            and host system capabilities when choosing quality level.
+
+            Recommended: 80 for balanced quality and performance.
+
+    config EXAMPLE_HTTP_PART_BOUNDARY
+        string "HTTP part boundary"
+        default "123456789000000000000987654321"
+        help
+            HTTP multipart boundary string used for MJPEG streaming.
+            
+            This boundary separates different parts in the HTTP multipart response.
+            Must be unique and not appear in the video data. The default value
+            is designed to be unique and safe for most applications.
+    
+    config EXAMPLE_MDNS_INSTANCE
+        string "mDNS instance"
+        default "web-cam"
+        help
+            mDNS instance name for service discovery.
+            
+            This name will be used to identify the camera service on the network.
+            Other devices can discover this camera using this instance name
+            through mDNS/Bonjour protocols.
+    
+    config EXAMPLE_MDNS_HOST_NAME
+        string "mDNS host name"
+        default "esp-web"
+        help
+            mDNS host name for the ESP32 device.
+            
+            This hostname will be used for network identification and can be
+            accessed as "esp-web.local" on the local network (if mDNS is supported
+            by the client device).
+
+    menu "HTTP server tasks"
+        config APP_CAPTURE_TASK_PRIORITY
+            int "Camera capture task priority (runs on the HTTP core)"
+            default 6
+            range 1 24
+            help
+                Dequeues every camera frame, hands it to the face pipeline and encodes JPEG only when a
+                stream/snapshot client is waiting. Keep it above the HTTP server priority.
+
+        config APP_HTTP_SERVER_TASK_CORE
+            int "HTTP server task core"
+            default 0
+            range 0 1
+            help
+                Core for the web/stream server tasks. The stream handler also dequeues frames, copies them
+                for the face pipeline, draws the overlay and drives the JPEG encoder, so keeping it off the
+                pipeline core leaves that core to the models.
+
+        config APP_HTTP_SERVER_TASK_PRIORITY
+            int "HTTP server task priority"
+            default 5
+            range 1 24
+    endmenu
+
+    menu "OV5647 (MIPI-CSI) connection"
+        config APP_OV5647_SCCB_I2C_PORT
+            int "SCCB (I2C) port"
+            default 0
+            range 0 1
+
+        config APP_OV5647_SCCB_I2C_SCL_PIN
+            int "SCCB (I2C) SCL pin"
+            default 8
+
+        config APP_OV5647_SCCB_I2C_SDA_PIN
+            int "SCCB (I2C) SDA pin"
+            default 7
+
+        config APP_OV5647_SCCB_I2C_FREQ
+            int "SCCB (I2C) frequency (Hz)"
+            default 100000
+
+        config APP_OV5647_RESET_PIN
+            int "Sensor reset pin (-1 if not connected)"
+            default -1
+
+        config APP_OV5647_PWDN_PIN
+            int "Sensor power-down pin (-1 if not connected)"
+            default -1
+    endmenu
+
+    menu "Face pipeline (detector + PFLD landmarks)"
+        config APP_FACE_PIPELINE_ENABLE
+            bool "Enable face pipeline (boxes + landmarks on the stream)"
+            default y
+
+        config APP_FACE_DETECT_EVERY_N_FRAMES
+            int "Run the face detector every N camera frames"
+            default 10
+            range 1 100
+            depends on APP_FACE_PIPELINE_ENABLE
+
+        config APP_PFLD_EVERY_N_FRAMES
+            int "Run PFLD (landmarks) every N camera frames"
+            default 1
+            range 1 100
+            depends on APP_FACE_PIPELINE_ENABLE
+            help
+                PFLD runs on the faces found by the latest detector run, using the current frame.
+                If the worker is still busy when a run is due, it is started on the next frame.
+                Frames come straight from the camera (~50 fps for 800x800), independent of the web
+                stream, so 1 means "as fast as the worker can go".
+
+        config APP_EYE_CLASSIFIER_ENABLE
+            bool "Eye open/closed classifier (instead of EAR) for the eyes-closed alert"
+            default y
+            depends on APP_FACE_PIPELINE_ENABLE
+            help
+                Crops each eye around its PFLD landmarks and runs open-closed-eye-0001 (32x32, INT8,
+                trained on infrared MRL eye images). Much more reliable than the eye aspect ratio,
+                which the PFLD landmarks barely change when the eyes close.
+                When disabled, the eyes-closed alert falls back to the calibrated EAR thresholds.
+
+        config APP_FACE_PIPELINE_TASK_PRIORITY
+            int "Pipeline task priority"
+            default 10
+            range 1 24
+            depends on APP_FACE_PIPELINE_ENABLE
+            help
+                The pipeline owns its core (APP_FACE_PIPELINE_TASK_CORE) while HTTP/Wi-Fi/lwIP run on the
+                other core, so it does not compete with the stream. A high priority keeps unpinned
+                low-priority tasks from being scheduled onto the pipeline core while a model is running.
+
+        config APP_FACE_PIPELINE_TASK_CORE
+            int "Pipeline task core"
+            default 1
+            range 0 1
+            depends on APP_FACE_PIPELINE_ENABLE
+            help
+                Core dedicated to the detector + PFLD. Keep it different from APP_HTTP_SERVER_TASK_CORE.
+
+        config APP_FACE_PIPELINE_TASK_STACK
+            int "Pipeline task stack size"
+            default 16384
+            depends on APP_FACE_PIPELINE_ENABLE
+    endmenu
+    menu "Speaker alerts (ES8311 + SPK header)"
+        config APP_AUDIO_ALERT_ENABLE
+            bool "Play alert sounds on the speaker"
+            default y
+            help
+                ES8311 codec (I2C 0x18, shared bus with the camera SCCB),
+                I2S MCLK=13 BCLK=12 WS=10 DOUT=9, amplifier enable GPIO53.
+
+        config APP_AUDIO_ALERT_VOLUME
+            int "Speaker volume (0-100)"
+            depends on APP_AUDIO_ALERT_ENABLE
+            range 0 100
+            default 80
+
+        config APP_AUDIO_ALERT_REPEAT_MS
+            int "Repeat the eyes-closed alarm every N ms while it lasts"
+            depends on APP_AUDIO_ALERT_ENABLE
+            range 500 10000
+            default 1500
+
+        config APP_AUDIO_ALERT_CALIB_SOUND
+            bool "Play a short chime when session calibration finishes"
+            depends on APP_AUDIO_ALERT_ENABLE
+            default y
+    endmenu
+endmenu

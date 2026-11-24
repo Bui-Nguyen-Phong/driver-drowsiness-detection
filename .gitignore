@@ -1,0 +1,19 @@
+# ESP-IDF generated
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+
+# Frontend build tools
+frontend/node_modules/
+frontend/dist/
+
+# Editors / OS
+.vscode/
+.idea/
+.cache/
+*.swp
+.DS_Store
+Thumbs.db
+__pycache__/

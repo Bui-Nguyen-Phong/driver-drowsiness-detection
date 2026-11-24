@@ -1,0 +1,20 @@
+dependencies:
+  idf: ">=5.4"
+  esp_video: ">=2.2,<3.0"
+  protocol_examples_common:
+    path: ${IDF_PATH}/examples/common_components/protocol_examples_common
+  espressif/mdns: "^1.0.3"
+  espressif/esp_codec_dev: "~1.5.4"
+  espressif/esp_wifi_remote:
+    matches:
+      - if: "idf_version >= 6.0"
+        version: ">=1.6,<2.0"
+      - if: "idf_version < 6.0"
+        version: "0.14.*"
+  espressif/cjson:
+    version: "^1.7.15"
+    rules:
+      - if: "idf_version >= 6.0"
+  espressif/human_face_detect:
+    version: "*"
+    override_path: "/home/phong/esp/esp-idf/esp-dl/models/human_face_detect"
